@@ -69,7 +69,7 @@ and encode_sig_part ctx ch jsig = match jsig with
   | TBool -> write_byte ch (Char.code 'Z')
   | TObject(path, params) ->
     write_byte ch (Char.code 'L');
-    write_string ch (encode_path ctx path);
+    nwrite ch (encode_path ctx path);
     if params <> [] then begin
       write_byte ch (Char.code '<');
       List.iter (encode_param ctx ch) params;
@@ -79,14 +79,14 @@ and encode_sig_part ctx ch jsig = match jsig with
   | TObjectInner(pack, inners) ->
     write_byte ch (Char.code 'L');
     List.iter (fun p ->
-      write_string ch p;
+      nwrite ch p;
       write_byte ch (Char.code '/')
     ) pack;
 
     let first = ref true in
     List.iter (fun (name,params) ->
       (if !first then first := false else write_byte ch (Char.code '.'));
-      write_string ch name;
+      nwrite ch name;
       if params <> [] then begin
         write_byte ch (Char.code '<');
         List.iter (encode_param ctx ch) params;
@@ -98,7 +98,7 @@ and encode_sig_part ctx ch jsig = match jsig with
     write_byte ch (Char.code '[');
     (match size with
     | Some size ->
-      write_string ch (string_of_int size);
+      nwrite ch (string_of_int size);
     | None -> ());
     encode_sig_part ctx ch s
   | TMethod(args, ret) ->
@@ -109,7 +109,7 @@ and encode_sig_part ctx ch jsig = match jsig with
       | Some jsig -> encode_sig_part ctx ch jsig)
   | TTypeParameter name ->
     write_byte ch (Char.code 'T');
-    write_string ch name;
+    nwrite ch name;
     write_byte ch (Char.code ';')
 
 let encode_sig ctx jsig =
@@ -132,7 +132,6 @@ let rec const ctx c =
     PMap.find c ctx.constants
   with
   | Not_found ->
-    let ret = ctx.ccount in
     (match c with
     (** references a class or an interface - jpath must be encoded as StringUtf8 *)
     | ConstClass path -> (* tag = 7 *)
@@ -215,8 +214,8 @@ let rec const ctx c =
         write_ui16 ctx.cpool bootstrap_method;
         write_ui16 ctx.cpool arg
     | ConstUnusable -> assert false);
-    ctx.ccount <- ret + 1;
-    ret
+    ctx.ccount <- ctx.ccount + 1;
+    ctx.ccount - 1
 
 let write_const ctx ch cconst =
   write_ui16 ch (const ctx cconst)
@@ -225,15 +224,15 @@ let write_const ctx ch cconst =
 let write_formal_type_params ctx ch tparams =
   write_byte ch (Char.code '<');
   List.iter (fun (name,ext,impl) ->
-    write_string ch name;
+    nwrite ch name;
     (match ext with
     | None -> ()
     | Some jsig ->
       write_byte ch (Char.code ':');
-      write_string ch (encode_sig ctx jsig));
+      nwrite ch (encode_sig ctx jsig));
     List.iter (fun jsig ->
       write_byte ch (Char.code ':');
-      write_string ch (encode_sig ctx jsig)
+      nwrite ch (encode_sig ctx jsig)
     ) impl
   ) tparams;
   write_byte ch (Char.code '>');
@@ -241,10 +240,10 @@ let write_formal_type_params ctx ch tparams =
 
 let write_complete_method_signature ctx ch (tparams : jtypes) msig throws =
   if tparams <> [] then write_formal_type_params ctx ch tparams;
-  write_string ch (encode_sig ctx (TMethod(msig)));
+  nwrite ch (encode_sig ctx (TMethod(msig)));
   if throws <> [] then List.iter (fun jsig ->
     write_byte ch (Char.code '^');
-    write_string ch (encode_sig ctx jsig)
+    nwrite ch (encode_sig ctx jsig)
   ) throws
 ;;
 
@@ -272,7 +271,7 @@ and write_element_value ctx ch value = match value with
     | TObject((["java";"lang"],"String"), []) ->
       write_byte ch (Char.code 's')
     | TByte | TChar | TDouble | TFloat | TInt | TLong | TShort | TBool ->
-      write_string ch (encode_sig ctx jsig)
+      nwrite ch (encode_sig ctx jsig)
     | _ ->
       let s = encode_sig ctx jsig in
       error ("Invalid signature " ^ s ^ " for constant value"));
@@ -326,7 +325,7 @@ let write_attribute ctx attr =
   in
   write_const_s ctx ctx.ch name;
   write_i32 ctx.ch (String.length contents);
-  write_string ctx.ch contents
+  nwrite ctx.ch contents
 
 let write_attributes ctx attributes =
   write_ui16 ctx.ch (List.length attributes);
@@ -373,5 +372,5 @@ let write_class ch_main c =
   List.iter (write_field ctx true) c.cmethods;
   write_attributes ctx c.cattributes;
   write_ui16 ch_main ctx.ccount;
-  write_string ch_main (close_out ctx.cpool);
-  write_string ch_main (close_out ch)
+  nwrite ch_main (close_out ctx.cpool);
+  nwrite ch_main (close_out ch)
