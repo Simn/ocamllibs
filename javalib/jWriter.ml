@@ -136,27 +136,35 @@ let rec const ctx c =
     (match c with
     (** references a class or an interface - jpath must be encoded as StringUtf8 *)
     | ConstClass path -> (* tag = 7 *)
+        let arg = (const ctx (ConstUtf8 (encode_path ctx path))) in
         write_byte ctx.cpool 7;
-        write_ui16 ctx.cpool (const ctx (ConstUtf8 (encode_path ctx path)))
+        write_ui16 ctx.cpool arg;
     (** field reference *)
     | ConstField (jpath, unqualified_name, jsignature) (* tag = 9 *) ->
+        let arg1 = (const ctx (ConstClass jpath)) in
+        let arg2 = (const ctx (ConstNameAndType (unqualified_name, jsignature))) in
         write_byte ctx.cpool 9;
-        write_ui16 ctx.cpool (const ctx (ConstClass jpath));
-        write_ui16 ctx.cpool (const ctx (ConstNameAndType (unqualified_name, jsignature)))
+        write_ui16 ctx.cpool arg1;
+        write_ui16 ctx.cpool arg2;
     (** method reference; string can be special "<init>" and "<clinit>" values *)
     | ConstMethod (jpath, unqualified_name, jmethod_signature) (* tag = 10 *) ->
+        let arg1 = (const ctx (ConstClass jpath)) in
+        let arg2 = (const ctx (ConstNameAndType (unqualified_name, TMethod jmethod_signature))) in
         write_byte ctx.cpool 10;
-        write_ui16 ctx.cpool (const ctx (ConstClass jpath));
-        write_ui16 ctx.cpool (const ctx (ConstNameAndType (unqualified_name, TMethod jmethod_signature)))
+        write_ui16 ctx.cpool arg1;
+        write_ui16 ctx.cpool arg2;
     (** interface method reference *)
     | ConstInterfaceMethod (jpath, unqualified_name, jmethod_signature) (* tag = 11 *) ->
+        let arg1 = (const ctx (ConstClass jpath)); in
+        let arg2 = (const ctx (ConstNameAndType (unqualified_name, TMethod jmethod_signature))) in
         write_byte ctx.cpool 11;
-        write_ui16 ctx.cpool (const ctx (ConstClass jpath));
-        write_ui16 ctx.cpool (const ctx (ConstNameAndType (unqualified_name, TMethod jmethod_signature)))
+        write_ui16 ctx.cpool arg1;
+        write_ui16 ctx.cpool arg2;
     (** constant values *)
     | ConstString s  (* tag = 8 *) ->
+        let arg = (const ctx (ConstUtf8 s)) in
         write_byte ctx.cpool 8;
-        write_ui16 ctx.cpool (const ctx (ConstUtf8 s))
+        write_ui16 ctx.cpool arg
     | ConstInt i (* tag = 3 *) ->
         write_byte ctx.cpool 3;
         write_real_i32 ctx.cpool i
@@ -180,9 +188,11 @@ let rec const ctx c =
         ctx.ccount <- ctx.ccount + 1
     (** name and type: used to represent a field or method, without indicating which class it belongs to *)
     | ConstNameAndType (unqualified_name, jsignature) ->
+        let arg1 = (const ctx (ConstUtf8 (unqualified_name))) in
+        let arg2 = (const ctx (ConstUtf8 (encode_sig ctx jsignature))) in
         write_byte ctx.cpool 12;
-        write_ui16 ctx.cpool (const ctx (ConstUtf8 (unqualified_name)));
-        write_ui16 ctx.cpool (const ctx (ConstUtf8 (encode_sig ctx jsignature)))
+        write_ui16 ctx.cpool arg1;
+        write_ui16 ctx.cpool arg2;
     (** UTF8 encoded strings. Note that when reading/writing, take into account Utf8 modifications of java *)
     (* (http://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.4.7) *)
     | ConstUtf8 s ->
@@ -191,19 +201,22 @@ let rec const ctx c =
         write_utf8 ctx.cpool s
     (** invokeDynamic-specific *)
     | ConstMethodHandle (reference_type, jconstant) (* tag = 15 *) ->
+        let arg = (const ctx jconstant) in
         write_byte ctx.cpool 15;
         write_byte ctx.cpool (get_reference_type reference_type);
-        write_ui16 ctx.cpool (const ctx jconstant)
+        write_ui16 ctx.cpool arg;
     | ConstMethodType jmethod_signature (* tag = 16 *) ->
+        let arg = (const ctx (ConstUtf8 (encode_sig ctx (TMethod jmethod_signature)))) in
         write_byte ctx.cpool 16;
-        write_ui16 ctx.cpool (const ctx (ConstUtf8 (encode_sig ctx (TMethod jmethod_signature))))
+        write_ui16 ctx.cpool arg
     | ConstInvokeDynamic (bootstrap_method, unqualified_name, jsignature) (* tag = 18 *) ->
+        let arg = (const ctx (ConstNameAndType(unqualified_name, jsignature))) in
         write_byte ctx.cpool 18;
         write_ui16 ctx.cpool bootstrap_method;
-        write_ui16 ctx.cpool (const ctx (ConstNameAndType(unqualified_name, jsignature)))
+        write_ui16 ctx.cpool arg
     | ConstUnusable -> assert false);
     ctx.ccount <- ret + 1;
-    ret
+    ret + 1
 
 let write_const ctx ch cconst =
   write_ui16 ch (const ctx cconst)
