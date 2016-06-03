@@ -26,6 +26,7 @@ exception Writer_error_message of string
 
 type context = {
   cpool : string IO.output;
+  ch : string IO.output;
   mutable ccount : int;
   mutable constants : (jconstant,int) PMap.t;
 }
@@ -315,60 +316,46 @@ let write_attribute ch (attr,data) =
   write_real_i32 ch (Int32.of_int (String.length data));
   write_string ch data
 
-let write_attributes ch attributes =
-  write_ui16 ch (List.length attributes);
-  List.iter (write_attribute ch) attributes
-
-let write_field ch (jf,jf_name,jf_sig,jf_attributes) =
-  write_ui16 ch (join_jaccess_flags jf.jf_flags);
-  write_ui16 ch jf_name;
-  write_ui16 ch jf_sig;
-  write_attributes ch jf_attributes
-
-let fill_constant_pool ch c =
-  let ctx = {
-    ccount = 0;
-    cpool = IO.output_string();
-    constants = PMap.empty;
-  } in
-  let index_from_signature = function
-    | TObject(path,[]) -> const ctx (ConstClass path)
-    | _ -> error "Invalid signature"
-  in
+let write_attributes ctx attributes =
+  write_ui16 ctx.ch (List.length attributes);
   let handle_attribute = function
     | AttrDeprecated -> const ctx (ConstUtf8 "Deprecated"),"";
     | AttrVisibleAnnotations _ | AttrInvisibleAnnotations _ -> assert false (* TODO *)
-    | AttrUnknown(name,data) -> const ctx (ConstUtf8 "Deprecated"),data
+    | AttrUnknown(name,data) -> const ctx (ConstUtf8 name),data
   in
-  let i_class_path = const ctx (ConstClass c.cpath) in
-  let i_super_path = index_from_signature c.csuper in
-  let i_interfaces = List.map (fun jsig -> index_from_signature jsig) c.cinterfaces in
-  let field jf =
-    let jf_name = const ctx (ConstUtf8 jf.jf_name) in
-    let jf_sig = const ctx (ConstUtf8 (encode_sig ctx jf.jf_vmsignature)) in
-    let jf_attributes = List.map handle_attribute jf.jf_attributes in
-    (jf,jf_name,jf_sig,jf_attributes)
-  in
-  let i_fields = List.map field c.cfields in
-  let i_methods = List.map field c.cmethods in
-  let i_attributes = List.map handle_attribute c.cattributes in
-  let cpool = IO.close_out ctx.cpool in
-  ctx.ccount,cpool,i_class_path,i_super_path,i_interfaces,i_fields,i_methods,i_attributes
+  List.iter (fun attr -> write_attribute ctx.ch (handle_attribute attr)) attributes
 
-let write_class ch c =
-  write_real_i32 ch 0xCAFEBABEl;
-  write_ui16 ch (fst c.cversion);
-  write_ui16 ch (snd c.cversion);
-  let ccount,cpool,i_class_path,i_super_path,i_interfaces,i_fields,i_methods,i_attributes = fill_constant_pool ch c in
-  write_ui16 ch ccount;
-  write_string ch cpool;
+let write_field ctx jf =
+  write_ui16 ctx.ch (join_jaccess_flags jf.jf_flags);
+  write_ui16 ctx.ch (const ctx (ConstUtf8 jf.jf_name));
+  write_ui16 ctx.ch (const ctx (ConstUtf8 (encode_sig ctx jf.jf_vmsignature)));
+  write_attributes ctx jf.jf_attributes
+
+let write_class ch_main c =
+  write_real_i32 ch_main 0xCAFEBABEl;
+  write_ui16 ch_main (fst c.cversion);
+  write_ui16 ch_main (snd c.cversion);
+  let ch = IO.output_string() in
+  let ctx = {
+    ccount = 0;
+    cpool = IO.output_string();
+    ch = ch;
+    constants = PMap.empty;
+  } in
+  let index_from_signature jsig = match jsig with
+    | TObject(path,[]) -> const ctx (ConstClass path)
+    | _ -> error "Invalid signature"
+  in
   write_ui16 ch (join_jaccess_flags c.cflags);
-  write_ui16 ch i_class_path;
-  write_ui16 ch i_super_path;
-  write_ui16 ch (List.length i_interfaces);
-  List.iter (fun i -> write_ui16 ch i) i_interfaces;
-  write_ui16 ch (List.length i_fields);
-  List.iter (write_field ch) i_fields;
-  write_ui16 ch (List.length i_methods);
-  List.iter (write_field ch) i_methods;
-  write_attributes ch i_attributes
+  write_ui16 ch (const ctx (ConstClass c.cpath));
+  write_ui16 ch (index_from_signature c.csuper);
+  write_ui16 ch (List.length c.cinterfaces);
+  List.iter (fun jsig -> write_ui16 ch (index_from_signature jsig)) c.cinterfaces;
+  write_ui16 ch (List.length c.cfields);
+  List.iter (write_field ctx) c.cfields;
+  write_ui16 ch (List.length c.cmethods);
+  List.iter (write_field ctx) c.cmethods;
+  write_attributes ctx c.cattributes;
+  write_ui16 ch_main ctx.ccount;
+  write_string ch_main (close_out ctx.cpool);
+  write_string ch_main (close_out ch)
