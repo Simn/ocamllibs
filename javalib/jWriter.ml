@@ -104,6 +104,7 @@ and encode_sig_part ctx ch jsig = match jsig with
   | TMethod(args, ret) ->
     write_byte ch (Char.code '(');
     List.iter (encode_sig_part ctx ch) args;
+    write_byte ch (Char.code ')');
     (match ret with
       | None -> write_byte ch (Char.code 'V')
       | Some jsig -> encode_sig_part ctx ch jsig)
@@ -117,15 +118,20 @@ let encode_sig ctx jsig =
   encode_sig_part ctx buf jsig;
   close_out buf
 
-let write_utf8 ch s =
-  String.iter (fun c ->
-    let c = Char.code c in
-    if c = 0 then begin
-      write_byte ch 0xC0;
-      write_byte ch 0x80
-    end else
-      write_byte ch c
-  ) s
+let change_utf8 s =
+   if String.contains s (Char.chr 0) then begin
+     let buf = Buffer.create (String.length s) in
+     String.iter (fun chr ->
+       let c = Char.code chr in
+       if c = 0 then begin
+         Buffer.add_char buf (Char.chr 0xC0);
+         Buffer.add_char buf (Char.chr 0x80)
+       end else
+         Buffer.add_char buf chr) s;
+      Buffer.contents buf
+   end else
+     s
+ ;;
 
 let rec const ctx c =
   try
@@ -196,8 +202,9 @@ let rec const ctx c =
     (* (http://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.4.7) *)
     | ConstUtf8 s ->
         write_byte ctx.cpool 1;
+        let s = change_utf8 s in
         write_ui16 ctx.cpool (String.length s);
-        write_utf8 ctx.cpool s
+        nwrite ctx.cpool s
     (** invokeDynamic-specific *)
     | ConstMethodHandle (reference_type, jconstant) (* tag = 15 *) ->
         let arg = (const ctx jconstant) in
