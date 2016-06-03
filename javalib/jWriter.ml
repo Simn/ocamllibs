@@ -311,19 +311,37 @@ let jaccess_flag_value = function
 let join_jaccess_flags =
   List.fold_left (fun i jacc -> i lor (jaccess_flag_value jacc)) 0
 
-let write_attribute ch (attr,data) =
-  write_ui16 ch attr;
-  write_real_i32 ch (Int32.of_int (String.length data));
-  write_string ch data
+let write_const_s ctx ch str =
+  write_const ctx ch (ConstUtf8 str)
+;;
+
+let write_attribute ctx attr =
+  let name, contents = match attr with
+    | AttrDeprecated ->
+      "Deprecated", ""
+    | AttrVisibleAnnotations anns
+    | AttrInvisibleAnnotations anns ->
+      let tmp = IO.output_string() in
+      write_ui16 tmp (List.length anns);
+      List.iter (write_annotation ctx tmp) anns;
+      let out = close_out tmp in
+      let name = match attr with
+        | AttrVisibleAnnotations _ ->
+          "RuntimeVisibleAnnotations"
+        | _ ->
+          "RuntimeInvisibleAnnotations"
+      in
+      name, out
+    | AttrUnknown(name,contents) ->
+      name, contents
+  in
+  write_const_s ctx ctx.ch name;
+  write_i32 ctx.ch (String.length contents);
+  write_string ctx.ch contents
 
 let write_attributes ctx attributes =
   write_ui16 ctx.ch (List.length attributes);
-  let handle_attribute = function
-    | AttrDeprecated -> const ctx (ConstUtf8 "Deprecated"),"";
-    | AttrVisibleAnnotations _ | AttrInvisibleAnnotations _ -> assert false (* TODO *)
-    | AttrUnknown(name,data) -> const ctx (ConstUtf8 name),data
-  in
-  List.iter (fun attr -> write_attribute ctx.ch (handle_attribute attr)) attributes
+  List.iter (write_attribute ctx) attributes
 
 let write_field ctx jf =
   write_ui16 ctx.ch (join_jaccess_flags jf.jf_flags);
