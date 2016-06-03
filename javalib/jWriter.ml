@@ -17,8 +17,8 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA
  *)
 open JData;;
-open IO.BigEndian;;
 open IO;;
+open IO.BigEndian;;
 open ExtString;;
 open ExtList;;
 
