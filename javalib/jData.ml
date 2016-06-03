@@ -198,6 +198,10 @@ type jconstant_raw =
   | KInvokeDynamic of (bootstrapref * nametyperef) (* 18 *)
   | KUnusable
 
+let all_class_flags = [JPublic; JUnusable; JUnusable; JUnusable; JFinal; JSuper; JUnusable; JUnusable; JUnusable; JInterface; JAbstract; JUnusable; JSynthetic; JAnnotation; JEnum]
+let all_field_flags = [JPublic; JPrivate; JProtected; JStatic; JFinal; JUnusable; JVolatile; JTransient; JSynthetic; JEnum]
+let all_method_flags = [JPublic; JPrivate; JProtected; JStatic; JFinal; JSynchronized; JBridge; JVarArgs; JNative; JUnusable; JAbstract; JStrict; JSynthetic]
+
 (* jData debugging *)
 let is_override_attrib = (function
     (* TODO: pass anotations as @:meta *)

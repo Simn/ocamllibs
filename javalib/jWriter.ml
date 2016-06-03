@@ -216,7 +216,7 @@ let rec const ctx c =
         write_ui16 ctx.cpool arg
     | ConstUnusable -> assert false);
     ctx.ccount <- ret + 1;
-    ret + 1
+    ret
 
 let write_const ctx ch cconst =
   write_ui16 ch (const ctx cconst)
@@ -248,14 +248,14 @@ let write_complete_method_signature ctx ch (tparams : jtypes) msig throws =
   ) throws
 ;;
 
-let write_access_flags ctx ch all_flags flags =
+let write_access_flags ctx all_flags flags =
   let value = List.fold_left (fun acc flag ->
     try
       acc lor (Hashtbl.find all_flags flag)
     with Not_found ->
       error ("Not found flag: " ^ (string_of_int (Obj.magic flag)))
   ) 0 flags in
-  write_ui16 ch value
+  write_ui16 ctx.ch value
 ;;
 
 let rec write_ann_element ctx ch (name,eval) =
@@ -300,30 +300,6 @@ and write_element_value ctx ch value = match value with
     List.iter (write_element_value ctx ch) lvals
 ;;
 
-let jaccess_flag_value = function
-  | JPublic -> 0x0001
-  | JPrivate -> 0x0002
-  | JProtected -> 0x0004
-  | JStatic -> 0x0008
-  | JFinal -> 0x0010
-  | JSynchronized -> 0x0020
-  | JVolatile -> 0x0040
-  | JTransient -> 0x0080
-  | JSynthetic -> 0x1000
-  | JEnum -> 0x4000
-  | JUnusable -> assert false
-  | JSuper -> 0x0020
-  | JInterface -> 0x0200
-  | JAbstract -> 0x0400
-  | JAnnotation -> 0x2000
-  | JBridge -> 0x0040
-  | JVarArgs -> 0x0080
-  | JNative -> 0x0100
-  | JStrict -> 0x0800
-
-let join_jaccess_flags =
-  List.fold_left (fun i jacc -> i lor (jaccess_flag_value jacc)) 0
-
 let write_const_s ctx ch str =
   write_const ctx ch (ConstUtf8 str)
 ;;
@@ -356,8 +332,17 @@ let write_attributes ctx attributes =
   write_ui16 ctx.ch (List.length attributes);
   List.iter (write_attribute ctx) attributes
 
-let write_field ctx jf =
-  write_ui16 ctx.ch (join_jaccess_flags jf.jf_flags);
+let enumerated_hashtbl_of_list l =
+  let h = Hashtbl.create 0 in
+  ExtList.List.iteri (fun i flag -> Hashtbl.add h flag (1 lsl i)) l;
+  h
+
+let all_class_flags_table = enumerated_hashtbl_of_list all_class_flags
+let all_field_flags_table = enumerated_hashtbl_of_list all_field_flags
+let all_method_flags_table = enumerated_hashtbl_of_list all_method_flags
+
+let write_field ctx is_method jf =
+  write_access_flags ctx (if is_method then all_method_flags_table else all_field_flags_table) jf.jf_flags;
   write_ui16 ctx.ch (const ctx (ConstUtf8 jf.jf_name));
   write_ui16 ctx.ch (const ctx (ConstUtf8 (encode_sig ctx jf.jf_vmsignature)));
   write_attributes ctx jf.jf_attributes
@@ -368,7 +353,7 @@ let write_class ch_main c =
   write_ui16 ch_main (snd c.cversion);
   let ch = IO.output_string() in
   let ctx = {
-    ccount = 0;
+    ccount = 1;
     cpool = IO.output_string();
     ch = ch;
     constants = PMap.empty;
@@ -377,15 +362,15 @@ let write_class ch_main c =
     | TObject(path,[]) -> const ctx (ConstClass path)
     | _ -> error "Invalid signature"
   in
-  write_ui16 ch (join_jaccess_flags c.cflags);
+  write_access_flags ctx all_class_flags_table c.cflags;
   write_ui16 ch (const ctx (ConstClass c.cpath));
   write_ui16 ch (index_from_signature c.csuper);
   write_ui16 ch (List.length c.cinterfaces);
   List.iter (fun jsig -> write_ui16 ch (index_from_signature jsig)) c.cinterfaces;
   write_ui16 ch (List.length c.cfields);
-  List.iter (write_field ctx) c.cfields;
+  List.iter (write_field ctx false) c.cfields;
   write_ui16 ch (List.length c.cmethods);
-  List.iter (write_field ctx) c.cmethods;
+  List.iter (write_field ctx true) c.cmethods;
   write_attributes ctx c.cattributes;
   write_ui16 ch_main ctx.ccount;
   write_string ch_main (close_out ctx.cpool);

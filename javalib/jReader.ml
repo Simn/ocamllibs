@@ -441,10 +441,8 @@ let parse_attributes ?on_special consts ch count =
 
 let parse_field kind consts ch =
   let all_flags = match kind with
-    | JKField ->
-      [JPublic; JPrivate; JProtected; JStatic; JFinal; JUnusable; JVolatile; JTransient; JSynthetic; JEnum]
-    | JKMethod ->
-      [JPublic; JPrivate; JProtected; JStatic; JFinal; JSynchronized; JBridge; JVarArgs; JNative; JUnusable; JAbstract; JStrict; JSynthetic]
+    | JKField -> all_field_flags
+    | JKMethod -> all_method_flags
   in
   let acc = ref (parse_access_flags ch all_flags) in
   let name = get_string consts ch in
@@ -515,7 +513,7 @@ let parse_class ch =
       c
   ) in
   let consts = Array.mapi (fun i _ -> expand_constant consts i) consts in
-  let flags = parse_access_flags ch [JPublic; JUnusable; JUnusable; JUnusable; JFinal; JSuper; JUnusable; JUnusable; JUnusable; JInterface; JAbstract; JUnusable; JSynthetic; JAnnotation; JEnum] in
+  let flags = parse_access_flags ch all_class_flags in
   let this = get_class consts ch in
   let super_idx = read_ui16 ch in
   let super = match super_idx with
