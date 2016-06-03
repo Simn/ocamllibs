@@ -310,7 +310,18 @@ let write_const_s ctx ch str =
   write_const ctx ch (ConstUtf8 str)
 ;;
 
-let write_attribute ctx attr =
+let rec generate_code_attribute ctx jcode =
+  let ch = output_string() in
+  write_ui16 ch jcode.jc_max_stack;
+  write_ui16 ch jcode.jc_max_locals;
+  write_i32 ch (Array.length jcode.jc_code);
+  (* TODO: actual code *)
+  write_ui16 ch (Array.length jcode.jc_exception_table);
+  (* TODO actual exceptions *)
+  write_attributes ctx ch jcode.jc_attributes;
+  close_out ch
+
+and write_attribute ctx ch attr =
   let name, contents = match attr with
     | AttrDeprecated ->
       "Deprecated", ""
@@ -327,16 +338,18 @@ let write_attribute ctx attr =
           "RuntimeInvisibleAnnotations"
       in
       name, out
+    | AttrCode jcode ->
+      "Code", generate_code_attribute ctx jcode
     | AttrUnknown(name,contents) ->
       name, contents
   in
-  write_const_s ctx ctx.ch name;
-  write_i32 ctx.ch (String.length contents);
-  nwrite ctx.ch contents
+  write_const_s ctx ch name;
+  write_i32 ch (String.length contents);
+  nwrite ch contents
 
-let write_attributes ctx attributes =
-  write_ui16 ctx.ch (List.length attributes);
-  List.iter (write_attribute ctx) attributes
+and write_attributes ctx ch attributes =
+  write_ui16 ch (List.length attributes);
+  List.iter (write_attribute ctx ch) attributes
 
 let enumerated_hashtbl_of_list l =
   let h = Hashtbl.create 0 in
@@ -351,7 +364,11 @@ let write_field ctx is_method jf =
   write_access_flags ctx (if is_method then all_method_flags_table else all_field_flags_table) jf.jf_flags;
   write_ui16 ctx.ch (const ctx (ConstUtf8 jf.jf_name));
   write_ui16 ctx.ch (const ctx (ConstUtf8 (encode_sig ctx jf.jf_vmsignature)));
-  write_attributes ctx jf.jf_attributes
+  let attributes = match jf.jf_code with
+    | None -> jf.jf_attributes
+    | Some jcode -> (AttrCode jcode) :: jf.jf_attributes
+  in
+  write_attributes ctx ctx.ch attributes
 
 let write_class ch_main c =
   write_real_i32 ch_main 0xCAFEBABEl;
@@ -377,7 +394,7 @@ let write_class ch_main c =
   List.iter (write_field ctx false) c.cfields;
   write_ui16 ch (List.length c.cmethods);
   List.iter (write_field ctx true) c.cmethods;
-  write_attributes ctx c.cattributes;
+  write_attributes ctx ctx.ch c.cattributes;
   write_ui16 ch_main ctx.ccount;
   nwrite ch_main (close_out ctx.cpool);
   nwrite ch_main (close_out ch)

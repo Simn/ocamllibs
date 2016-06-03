@@ -92,8 +92,6 @@ type jconstant =
   | ConstInvokeDynamic of (bootstrap_method * unqualified_name * jsignature) (* tag = 18 *)
   | ConstUnusable
 
-type jcode = unit (* TODO *)
-
 type jaccess_flag =
   | JPublic (* 0x0001 *)
   | JPrivate (* 0x0002 *)
@@ -135,10 +133,19 @@ and jannotation_value =
   | ValAnnotation of jannotation (* @ *)
   | ValArray of jannotation_value list (* [ *)
 
-type jattribute =
+type jcode = {
+  jc_max_stack : int;
+  jc_max_locals : int;
+  jc_code : int array;
+  jc_exception_table : unit array; (* TODO *)
+  jc_attributes : jattribute list;
+}
+
+and jattribute =
   | AttrDeprecated
   | AttrVisibleAnnotations of jannotation list
   | AttrInvisibleAnnotations of jannotation list
+  | AttrCode of jcode
   | AttrUnknown of string * string
 
 type jfield_kind =
