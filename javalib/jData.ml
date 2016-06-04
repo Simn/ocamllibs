@@ -313,6 +313,9 @@ type jopcode =
   | OpReturn
   | OpTableswitch (* TODO *)
   | OpWide (* TODO *)
+  (* convenience/custom *)
+  | OpIconst of int32
+  | OpDconst of float
 
 type jcode = {
   jc_max_stack : int;
@@ -609,3 +612,5 @@ let s_jcode code =
   | OpReturn -> "return"
   | OpTableswitch -> "tableswitch"
   | OpWide -> "wide"
+  | OpIconst i -> wi "iconst" (Int32.to_int i)
+  | OpDconst f -> Printf.sprintf "dconst %f" f

@@ -332,7 +332,7 @@ let write_opcode ctx ch code =
   let field f =
     bp (const ctx (ConstField f))
   in
-  match code with
+  let rec loop code = match code with
     (* double *)
     | OpD2f -> w 0x90
     | OpD2i -> w 0x8e
@@ -552,6 +552,36 @@ let write_opcode ctx ch code =
     | OpReturn -> w 0xb1
     | OpTableswitch -> assert false (* TODO *)
     | OpWide -> assert false (* TODO *)
+    (* convenience/custom *)
+    | OpIconst i32 ->
+      let op = match Int32.to_int i32 with
+        | -1 -> OpIconst_m1
+        | 0 -> OpIconst_0
+        | 1 -> OpIconst_1
+        | 2 -> OpIconst_2
+        | 3 -> OpIconst_3
+        | 4 -> OpIconst_4
+        | 5 -> OpIconst_5
+        | i ->
+          if i >= -128 && i <= 127 then
+            OpBipush i
+          else if i >= -32768 && i <= 32767 then
+            OpSipush i
+          else
+            let c = const ctx (ConstInt i32) in
+            if c <= 255 then OpLdc c
+            else OpLdc_w c
+      in
+      loop op
+    | OpDconst f ->
+      let op = match f with
+        | 0.0 -> OpDconst_0
+        | 1.0 -> OpDconst_1
+        | _ -> OpLdc2_w (const ctx (ConstDouble f))
+      in
+      loop op
+  in
+  loop code
 
 let rec generate_code_attribute ctx jcode =
   let ch = output_string() in
