@@ -310,12 +310,258 @@ let write_const_s ctx ch str =
   write_const ctx ch (ConstUtf8 str)
 ;;
 
+let write_opcode ctx ch code =
+  let w = write_byte ch in
+  (* TODO: probably don't need these *)
+  let bp i =
+    w ((i lsr 8) land 0xFF);
+    w (i land 0xFF);
+  in
+  let b4 i =
+    w ((i lsr 24) land 0xFF);
+    w ((i lsr 16) land 0xFF);
+    w ((i lsr 8) land 0xFF);
+    w (i land 0xFF);
+  in
+  let path jpath =
+    bp (const ctx (ConstClass jpath))
+  in
+  let meth m =
+    bp (const ctx (ConstMethod m))
+  in
+  let field f =
+    bp (const ctx (ConstField f))
+  in
+  match code with
+    (* double *)
+    | OpD2f -> w 0x90
+    | OpD2i -> w 0x8e
+    | OpD2l -> w 0x8f
+    | OpDadd -> w 0x63
+    | OpDaload -> w 0x31
+    | OpDastore -> w 0x52
+    | OpDcmpg -> w 0x98
+    | OpDcmpl -> w 0x97
+    | OpDdiv -> w 0x6f
+    | OpDconst_0 -> w 0xe
+    | OpDconst_1 -> w 0xf
+    | OpDload 0 -> w 0x26
+    | OpDload 1 -> w 0x27
+    | OpDload 2 -> w 0x28
+    | OpDload 3 -> w 0x29
+    | OpDload i -> w 0x18; w i
+    | OpDmul -> w 0x6b
+    | OpDneg -> w 0x77
+    | OpDrem -> w 0x73
+    | OpDreturn -> w 0xaf
+    | OpDstore 0 -> w 0x47
+    | OpDstore 1 -> w 0x48
+    | OpDstore 2 -> w 0x49
+    | OpDstore 3 -> w 0x4a
+    | OpDstore i -> w 0x39; w i
+    | OpDsub -> w 0x67
+    (* float *)
+    | OpF2d -> w 0x8d
+    | OpF2i -> w 0x8b
+    | OpF2l -> w 0x8c
+    | OpFadd -> w 0x62
+    | OpFaload -> w 0x30
+    | OpFastore -> w 0x51
+    | OpFcmpg -> w 0x96
+    | OpFcmpl -> w 0x95
+    | OpFdiv -> w 0x6e
+    | OpFconst_0 -> w 0xb
+    | OpFconst_1 -> w 0xc
+    | OpFconst_2 -> w 0xd
+    | OpFload 0 -> w 0x22
+    | OpFload 1 -> w 0x23
+    | OpFload 2 -> w 0x24
+    | OpFload 3 -> w 0x25
+    | OpFload i -> w 0x17; w i
+    | OpFmul -> w 0x6a
+    | OpFneg -> w 0x76
+    | OpFrem -> w 0x72
+    | OpFreturn -> w 0xae
+    | OpFstore 0 -> w 0x43
+    | OpFstore 1 -> w 0x44
+    | OpFstore 2 -> w 0x45
+    | OpFstore 3 -> w 0x46
+    | OpFstore i -> w 0x38; w i
+    | OPFsub -> w 0x66
+    (* int *)
+    | OpI2b -> w 0x91
+    | OpI2c -> w 0x92
+    | OpI2d -> w 0x87
+    | OpI2f -> w 0x86
+    | OpI2l -> w 0x85
+    | OpI2s -> w 0x93
+    | OpIadd -> w 0x60
+    | OpIaload -> w 0x2e
+    | OpIand -> w 0x7e
+    | OpIastore -> w 0x4f
+    | OpIconst_m1 -> w 0x2
+    | OpIconst_0 -> w 0x3
+    | OpIconst_1 -> w 0x4
+    | OpIconst_2 -> w 0x5
+    | OpIconst_3 -> w 0x6
+    | OpIconst_4 -> w 0x7
+    | OpIconst_5 -> w 0x8
+    | OpIdiv -> w 0x6c
+    | OpIload 0 -> w 0x1a
+    | OpIload 1 -> w 0x1b
+    | OpIload 2 -> w 0x1c
+    | OpIload 3 -> w 0x1d
+    | OpIload i -> w 0x15; w i
+    | OpImul -> w 0x68
+    | OpIneg -> w 0x74
+    | OpIor -> w 0x80
+    | OpIrem -> w 0x70
+    | OpIreturn -> w 0xac
+    | OpIshl -> w 0x78
+    | OpIshr -> w 0x7a
+    | OpIstore 0 -> w 0x3b
+    | OpIstore 1 -> w 0x3c
+    | OpIstore 2 -> w 0x3d
+    | OpIstore 3 -> w 0x3e
+    | OpIstore i -> w 0x36; w i
+    | OpIsub -> w 0x64
+    | OpIushr -> w 0x7c
+    | OpIxor -> w 0x82
+    (* long *)
+    | OpL2d -> w 0x8a
+    | OpL2f -> w 0x89
+    | OpL2i -> w 0x88
+    | OpLadd -> w 0x61
+    | OpLaload -> w 0x2f
+    | OpLand -> w 0x7f
+    | OpLastore -> w 0x50
+    | OpLcmp -> w 0x94
+    | OpLdiv -> w 0x6d
+    | OpLload 0 -> w 0x1e
+    | OpLload 1 -> w 0x1f
+    | OpLload 2 -> w 0x20
+    | OpLload 3 -> w 0x21
+    | OpLload i ->  w 0x16; w i
+    | OpLmul -> w 0x69
+    | OpLneg -> w 0x75
+    | OpLor -> w 0x81
+    | OpLrem -> w 0x71
+    | OpLreturn -> w 0xad
+    | OpLshl -> w 0x79
+    | OpLshr -> w 0x7b
+    | OpLstore 0 -> w 0x3f
+    | OpLstore 1 -> w 0x40
+    | OpLstore 2 -> w 0x41
+    | OpLstore 3 -> w 0x42
+    | OpLstore i -> w 0x37; w i
+    | OpLsub -> w 0x65
+    | OpLushr -> w 0x7d
+    | OpLxor -> w 0x83
+    (* short *)
+    | OpSaload -> w 0x35
+    | OpSastore -> w 0x56
+    | OpSipush i -> w 0x11; bp i
+    (* array *)
+    | OpAaload -> w 0x32
+    | OpAastore -> w 0x53
+    | OpAnewarray jpath -> w 0xbd; path jpath
+    | OpArraylength -> w 0xbe
+    | OpBaload -> w 0x33
+    | OpBastore -> w 0x54
+    | OpBipush i -> w 0x10; w i
+    | OpCaload -> w 0x34
+    | OpCastore -> w 0x55
+    | OpMultianewarray(jpath,d) -> w 0xc5; path jpath; w d
+    | OpNewarray jsig -> assert false
+    (* reference *)
+    | OpAload 0 -> w 0x2a
+    | OpAload 1 -> w 0x2b
+    | OpAload 2 -> w 0x2c
+    | OpAload 3 -> w 0x2d
+    | OpAload i -> w 0x19; w i
+    | OpAreturn -> w 0xb0
+    | OpAstore 0 -> w 0x4b
+    | OpAstore 1 -> w 0x4c
+    | OpAstore 2 -> w 0x4d
+    | OpAstore 3 -> w 0x4e
+    | OpAstore i -> w 0x3a; w i
+    (* object *)
+    | OpNew jpath -> w 0xbb; path jpath
+    | Opinstanceof jpath -> w 0xc1; path jpath
+    | OpCheckcast jpath -> w 0xc0; path jpath
+    | OpInvokedynamic id -> w 0xba; bp (const ctx (ConstInvokeDynamic id)); w 0; w 0 (* ??? *)
+    | OpInvokeinterface(im,c) -> w 0xb9; bp (const ctx (ConstInterfaceMethod im)); w c
+    | OpInvokespecial m -> w 0xb7; meth m
+    | OpInvokestatic m -> w 0xb8; meth m
+    | OpInvokevirtual m -> w 0xb6; meth m
+    | OpGetfield f -> w 0xb4; field f
+    | OpGetstatic f -> w 0xb2; field f
+    | OpPutfield f -> w 0xb5; field f
+    | OpPutstatic f -> w 0xb3; field f
+    (* branching *)
+    | OpIf_acmpeq i -> w 0xa5; bp i
+    | OpIf_acmpne i -> w 0xa6; bp i
+    | OpIf_icmp(cmp,i) ->
+      begin match cmp with
+        | CmpEq -> w 0x9f
+        | CmpNe -> w 0xa0
+        | CmpLt -> w 0xa1
+        | CmpGe -> w 0xa2
+        | CmpGt -> w 0xa3
+        | CmpLe -> w 0xa4
+      end;
+      bp i
+    | OpIf(cmp,i) ->
+      begin match cmp with
+        | CmpEq -> w 0x99
+        | CmpNe -> w 0x9a
+        | CmpLt -> w 0x9b
+        | CmpGe -> w 0x9c
+        | CmpGt -> w 0x9d
+        | CmpLe -> w 0x9e
+      end;
+      bp i
+    | OpIfnonnull i -> w 0xc7; bp i
+    | OpIfnull i -> w 0xc6; bp i
+    | OpGoto i -> w 0xa7; bp i
+    | OpGoto_w i -> w 0xc8; b4 i
+    | OpJsr i -> w 0xa8; bp i
+    | OpJsr_w i -> w 0xc9; b4 i
+    (* stack *)
+    | OpAconst_null -> w 0x1
+    | OpDup -> w 0x59
+    | OpDup_x1 -> w 0x5a
+    | OpDup_x2 -> w 0x5b
+    | OpDup2 -> w 0x5c
+    | OpDup2_x1 -> w 0x5d
+    | OpDup2_x2 -> w 0x5e
+    | OpLdc i -> w 0x12; w i
+    | OpLdc_w i -> w 0x13; bp i
+    | OpLdc2_w i -> w 0x14; bp i
+    | OpNop -> w 0x0
+    | OpPop -> w 0x57
+    | OpPop2 -> w 0x58
+    | OpSwap -> w 0x5f
+    (* other *)
+    | OpAthrow -> w 0xbf
+    | OpIinc(i,c) -> w 0x84; w i; w c (* TODO: signed? *)
+    | OpLookupswitch -> assert false (* TODO *)
+    | OpMonitorenter -> w 0xc2
+    | OpMonitorexit -> w 0xc3
+    | OpRet i -> w 0xa9; w i
+    | OpReturn -> w 0xb1
+    | OpTableswitch -> assert false (* TODO *)
+    | OpWide -> assert false (* TODO *)
+
 let rec generate_code_attribute ctx jcode =
   let ch = output_string() in
   write_ui16 ch jcode.jc_max_stack;
   write_ui16 ch jcode.jc_max_locals;
-  write_i32 ch (Array.length jcode.jc_code);
-  (* TODO: actual code *)
+  let tmp = output_string() in
+  Array.iter (write_opcode ctx tmp) jcode.jc_code;
+  let s = close_out tmp in
+  write_i32 ch (String.length s);
+  nwrite ch s;
   write_ui16 ch (Array.length jcode.jc_exception_table);
   (* TODO actual exceptions *)
   write_attributes ctx ch jcode.jc_attributes;

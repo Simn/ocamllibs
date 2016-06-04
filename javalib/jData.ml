@@ -66,15 +66,20 @@ type reference_type =
 (* TODO *)
 type bootstrap_method = int
 
+type jconstant_field = jpath * unqualified_name * jsignature
+type jconstant_method = jpath * unqualified_name * jmethod_signature
+type jconstant_interface_method = jpath * unqualified_name * jmethod_signature
+type jconstant_invoke_dynamic = bootstrap_method * unqualified_name * jsignature
+
 type jconstant =
   (** references a class or an interface - jpath must be encoded as StringUtf8 *)
   | ConstClass of jpath (* tag = 7 *)
   (** field reference *)
-  | ConstField of (jpath * unqualified_name * jsignature) (* tag = 9 *)
+  | ConstField of jconstant_field (* tag = 9 *)
   (** method reference; string can be special "<init>" and "<clinit>" values *)
-  | ConstMethod of (jpath * unqualified_name * jmethod_signature) (* tag = 10 *)
+  | ConstMethod of jconstant_method (* tag = 10 *)
   (** interface method reference *)
-  | ConstInterfaceMethod of (jpath * unqualified_name * jmethod_signature) (* tag = 11 *)
+  | ConstInterfaceMethod of jconstant_interface_method (* tag = 11 *)
   (** constant values *)
   | ConstString of string  (* tag = 8 *)
   | ConstInt of int32 (* tag = 3 *)
@@ -89,7 +94,7 @@ type jconstant =
   (** invokeDynamic-specific *)
   | ConstMethodHandle of (reference_type * jconstant) (* tag = 15 *)
   | ConstMethodType of jmethod_signature (* tag = 16 *)
-  | ConstInvokeDynamic of (bootstrap_method * unqualified_name * jsignature) (* tag = 18 *)
+  | ConstInvokeDynamic of jconstant_invoke_dynamic (* tag = 18 *)
   | ConstUnusable
 
 type jaccess_flag =
@@ -133,10 +138,186 @@ and jannotation_value =
   | ValAnnotation of jannotation (* @ *)
   | ValArray of jannotation_value list (* [ *)
 
+type jindex = int
+type jbyte = int
+type jshort = int
+type jbranchoffset = int
+
+type jcmp =
+  | CmpEq
+  | CmpNe
+  | CmpLt
+  | CmpGe
+  | CmpGt
+  | CmpLe
+
+type jopcode =
+  (* double *)
+  | OpD2f
+  | OpD2i
+  | OpD2l
+  | OpDadd
+  | OpDaload
+  | OpDastore
+  | OpDcmpg
+  | OpDcmpl
+  | OpDdiv
+  | OpDconst_0
+  | OpDconst_1
+  | OpDload of jindex
+  | OpDmul
+  | OpDneg
+  | OpDrem
+  | OpDreturn
+  | OpDstore of jindex
+  | OpDsub
+  (* float *)
+  | OpF2d
+  | OpF2i
+  | OpF2l
+  | OpFadd
+  | OpFaload
+  | OpFastore
+  | OpFcmpg
+  | OpFcmpl
+  | OpFdiv
+  | OpFconst_0
+  | OpFconst_1
+  | OpFconst_2
+  | OpFload of jindex
+  | OpFmul
+  | OpFneg
+  | OpFrem
+  | OpFreturn
+  | OpFstore of jindex
+  | OPFsub
+  (* int *)
+  | OpI2b
+  | OpI2c
+  | OpI2d
+  | OpI2f
+  | OpI2l
+  | OpI2s
+  | OpIadd
+  | OpIaload
+  | OpIand
+  | OpIastore
+  | OpIconst_m1
+  | OpIconst_0
+  | OpIconst_1
+  | OpIconst_2
+  | OpIconst_3
+  | OpIconst_4
+  | OpIconst_5
+  | OpIdiv
+  | OpIload of jindex
+  | OpImul
+  | OpIneg
+  | OpIor
+  | OpIrem
+  | OpIreturn
+  | OpIshl
+  | OpIshr
+  | OpIstore of jindex
+  | OpIsub
+  | OpIushr
+  | OpIxor
+  (* long *)
+  | OpL2d
+  | OpL2f
+  | OpL2i
+  | OpLadd
+  | OpLaload
+  | OpLand
+  | OpLastore
+  | OpLcmp
+  | OpLdiv
+  | OpLload of jindex
+  | OpLmul
+  | OpLneg
+  | OpLor
+  | OpLrem
+  | OpLreturn
+  | OpLshl
+  | OpLshr
+  | OpLstore of jindex
+  | OpLsub
+  | OpLushr
+  | OpLxor
+  (* short *)
+  | OpSaload
+  | OpSastore
+  | OpSipush of jshort
+  (* array *)
+  | OpAaload
+  | OpAastore
+  | OpAnewarray of jpath
+  | OpArraylength
+  | OpBaload
+  | OpBastore
+  | OpBipush of jbyte
+  | OpCaload
+  | OpCastore
+  | OpMultianewarray of jpath * jbyte
+  | OpNewarray of jsignature (* not really, but might work *)
+  (* reference *)
+  | OpAload of jindex
+  | OpAreturn
+  | OpAstore of jindex
+  (* object *)
+  | OpNew of jpath
+  | Opinstanceof of jpath
+  | OpCheckcast of jpath
+  | OpInvokedynamic of jconstant_invoke_dynamic
+  | OpInvokeinterface of jconstant_interface_method * jbyte
+  | OpInvokespecial of jconstant_method
+  | OpInvokestatic of jconstant_method
+  | OpInvokevirtual of jconstant_method
+  | OpGetfield of jconstant_field
+  | OpGetstatic of jconstant_field
+  | OpPutfield of jconstant_field
+  | OpPutstatic of jconstant_field
+  (* branching *)
+  | OpIf_acmpeq of jbranchoffset
+  | OpIf_acmpne of jbranchoffset
+  | OpIf_icmp of jcmp * jbranchoffset
+  | OpIf of jcmp * jbranchoffset
+  | OpIfnonnull of jbranchoffset
+  | OpIfnull of jbranchoffset
+  | OpGoto of jbranchoffset
+  | OpGoto_w of jbranchoffset
+  | OpJsr of jbranchoffset
+  | OpJsr_w of jbranchoffset
+  (* stack *)
+  | OpAconst_null
+  | OpDup
+  | OpDup_x1
+  | OpDup_x2
+  | OpDup2
+  | OpDup2_x1
+  | OpDup2_x2
+  | OpLdc of jindex
+  | OpLdc_w of jindex
+  | OpLdc2_w of jindex
+  | OpNop
+  | OpPop
+  | OpPop2
+  | OpSwap
+  (* other *)
+  | OpAthrow
+  | OpIinc of jindex * jbyte
+  | OpLookupswitch (* TODO *)
+  | OpMonitorenter
+  | OpMonitorexit
+  | OpRet of jindex
+  | OpReturn
+  | OpTableswitch (* TODO *)
+  | OpWide (* TODO *)
+
 type jcode = {
   jc_max_stack : int;
   jc_max_locals : int;
-  jc_code : int array;
+  jc_code : jopcode array;
   jc_exception_table : unit array; (* TODO *)
   jc_attributes : jattribute list;
 }
