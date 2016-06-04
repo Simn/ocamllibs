@@ -138,6 +138,7 @@ let rec const ctx c =
     PMap.find c ctx.constants
   with
   | Not_found ->
+    let size = ref 1 in
     (match c with
     (** references a class or an interface - jpath must be encoded as StringUtf8 *)
     | ConstClass path -> (* tag = 7 *)
@@ -187,10 +188,11 @@ let rec const ctx c =
     | ConstLong i (* tag = 5 *) ->
         write_byte ctx.cpool 5;
         write_i64 ctx.cpool i;
+        size := 2;
     | ConstDouble d (* tag = 6 *) ->
         write_byte ctx.cpool 6;
         write_double ctx.cpool d;
-        ctx.ccount <- ctx.ccount + 1
+        size := 2;
     (** name and type: used to represent a field or method, without indicating which class it belongs to *)
     | ConstNameAndType (unqualified_name, jsignature) ->
         let arg1 = (const ctx (ConstUtf8 (unqualified_name))) in
@@ -221,8 +223,8 @@ let rec const ctx c =
         write_ui16 ctx.cpool bootstrap_method;
         write_ui16 ctx.cpool arg
     | ConstUnusable -> assert false);
-    ctx.ccount <- ctx.ccount + 1;
-    ctx.ccount - 1
+    ctx.ccount <- ctx.ccount + !size;
+    ctx.ccount - !size
 
 let write_const ctx ch cconst =
   write_ui16 ch (const ctx cconst)
