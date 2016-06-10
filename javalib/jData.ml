@@ -164,11 +164,19 @@ type jopcode =
   | OpDdiv
   | OpDconst_0
   | OpDconst_1
+  | OpDload_0
+  | OpDload_1
+  | OpDload_2
+  | OpDload_3
   | OpDload of jindex
   | OpDmul
   | OpDneg
   | OpDrem
   | OpDreturn
+  | OpDstore_0
+  | OpDstore_1
+  | OpDstore_2
+  | OpDstore_3
   | OpDstore of jindex
   | OpDsub
   (* float *)
@@ -184,11 +192,19 @@ type jopcode =
   | OpFconst_0
   | OpFconst_1
   | OpFconst_2
+  | OpFload_0
+  | OpFload_1
+  | OpFload_2
+  | OpFload_3
   | OpFload of jindex
   | OpFmul
   | OpFneg
   | OpFrem
   | OpFreturn
+  | OpFstore_0
+  | OpFstore_1
+  | OpFstore_2
+  | OpFstore_3
   | OpFstore of jindex
   | OPFsub
   (* int *)
@@ -210,6 +226,10 @@ type jopcode =
   | OpIconst_4
   | OpIconst_5
   | OpIdiv
+  | OpIload_0
+  | OpIload_1
+  | OpIload_2
+  | OpIload_3
   | OpIload of jindex
   | OpImul
   | OpIneg
@@ -218,6 +238,10 @@ type jopcode =
   | OpIreturn
   | OpIshl
   | OpIshr
+  | OpIstore_0
+  | OpIstore_1
+  | OpIstore_2
+  | OpIstore_3
   | OpIstore of jindex
   | OpIsub
   | OpIushr
@@ -232,6 +256,10 @@ type jopcode =
   | OpLastore
   | OpLcmp
   | OpLdiv
+  | OpLload_0
+  | OpLload_1
+  | OpLload_2
+  | OpLload_3
   | OpLload of jindex
   | OpLmul
   | OpLneg
@@ -240,6 +268,10 @@ type jopcode =
   | OpLreturn
   | OpLshl
   | OpLshr
+  | OpLstore_0
+  | OpLstore_1
+  | OpLstore_2
+  | OpLstore_3
   | OpLstore of jindex
   | OpLsub
   | OpLushr
@@ -261,8 +293,16 @@ type jopcode =
   | OpMultianewarray of jpath * jbyte
   | OpNewarray of jsignature (* not really, but might work *)
   (* reference *)
+  | OpAload_0
+  | OpAload_1
+  | OpAload_2
+  | OpAload_3
   | OpAload of jindex
   | OpAreturn
+  | OpAstore_0
+  | OpAstore_1
+  | OpAstore_2
+  | OpAstore_3
   | OpAstore of jindex
   (* object *)
   | OpNew of jpath
@@ -280,11 +320,11 @@ type jopcode =
   (* branching *)
   | OpIf_acmpeq of jbranchoffset
   | OpIf_acmpne of jbranchoffset
-  | OpIf_icmp of jcmp * jbranchoffset
-  | OpIf of jcmp * jbranchoffset
+  | OpIf_icmp of jcmp * jbranchoffset ref
+  | OpIf of jcmp * jbranchoffset ref
   | OpIfnonnull of jbranchoffset
   | OpIfnull of jbranchoffset
-  | OpGoto of jbranchoffset
+  | OpGoto of jbranchoffset ref
   | OpGoto_w of jbranchoffset
   | OpJsr of jbranchoffset
   | OpJsr_w of jbranchoffset
@@ -313,9 +353,51 @@ type jopcode =
   | OpReturn
   | OpTableswitch (* TODO *)
   | OpWide (* TODO *)
-  (* convenience/custom *)
-  | OpIconst of int32
-  | OpDconst of float
+
+module VerificationTypeInfo = struct
+  type t =
+    | VTITop
+    | VTIInteger
+    | VTIFloat
+    | VTILong
+    | VTIDouble
+    | VTINull
+    | VTIUninitializedThis
+    | VTIObject of jpath
+    | VTIUninitializedVariable of int
+
+  let of_jsignature jsig = match jsig with
+    | TByte | TChar | TBool | TShort | TInt -> VTIInteger
+    | TFloat -> VTIFloat
+    | TLong -> VTILong
+    | TDouble -> VTIDouble
+    | TObject(path,_) -> VTIObject path
+    | _ -> assert false
+
+  let of_method_arguments l =
+    List.map of_jsignature l
+
+  let get_size vtt = match vtt with
+    | VTIDouble | VTILong -> 2
+    | _ -> 1
+
+  let to_string vtt = match vtt with
+    | VTITop -> "top"
+    | VTIInteger -> "integer"
+    | VTIFloat -> "float"
+    | VTILong -> "long"
+    | VTIDouble -> "double"
+    | VTINull -> "null"
+    | VTIUninitializedThis -> "uninitializedThis"
+    | VTIObject path -> "object " ^ (snd path)
+    | VTIUninitializedVariable i -> "uninitializedVariable " ^ (string_of_int i)
+end
+
+type full_frame = {
+  ff_offset_delta : int;
+  ff_locals : VerificationTypeInfo.t list;
+  ff_stack_items : VerificationTypeInfo.t list;
+}
 
 type jcode = {
   jc_max_stack : int;
@@ -330,6 +412,7 @@ and jattribute =
   | AttrVisibleAnnotations of jannotation list
   | AttrInvisibleAnnotations of jannotation list
   | AttrCode of jcode
+  | AttrStackMapTable of full_frame list
   | AttrUnknown of string * string
 
 type jfield_kind =
@@ -463,11 +546,19 @@ let s_jcode code =
   | OpDdiv -> "ddiv"
   | OpDconst_0 -> "dconst_0"
   | OpDconst_1 -> "dconst_1"
+  | OpDload_0 -> "dload_0"
+  | OpDload_1 -> "dload_1"
+  | OpDload_2 -> "dload_2"
+  | OpDload_3 -> "dload_3"
   | OpDload i -> wi "dload" i
   | OpDmul -> "dmul"
   | OpDneg -> "dneg"
   | OpDrem -> "drem"
   | OpDreturn -> "dreturn"
+  | OpDstore_0 -> "dstore_0"
+  | OpDstore_1 -> "dstore_1"
+  | OpDstore_2 -> "dstore_2"
+  | OpDstore_3 -> "dstore_3"
   | OpDstore i -> wi "dstore" i
   | OpDsub -> "dsub"
   (* float *)
@@ -483,11 +574,19 @@ let s_jcode code =
   | OpFconst_0 -> "fconst_0"
   | OpFconst_1 -> "fconst_1"
   | OpFconst_2 -> "fconst_2"
+  | OpFload_0 -> "fload_0"
+  | OpFload_1 -> "fload_1"
+  | OpFload_2 -> "fload_2"
+  | OpFload_3 -> "fload_3"
   | OpFload i -> wi "fload" i
   | OpFmul -> "fmul"
   | OpFneg -> "fneg"
   | OpFrem -> "frem"
   | OpFreturn -> "freturn"
+  | OpFstore_0 -> "fstore_0"
+  | OpFstore_1 -> "fstore_1"
+  | OpFstore_2 -> "fstore_2"
+  | OpFstore_3 -> "fstore_3"
   | OpFstore i -> wi "fstore" i
   | OPFsub -> "fsub"
   (* int *)
@@ -509,6 +608,10 @@ let s_jcode code =
   | OpIconst_4 -> "iconst_4"
   | OpIconst_5 -> "iconst_5"
   | OpIdiv -> "idiv"
+  | OpIload_0 -> "iload_0"
+  | OpIload_1 -> "iload_1"
+  | OpIload_2 -> "iload_2"
+  | OpIload_3 -> "iload_3"
   | OpIload i -> wi "iload" i
   | OpImul -> "imul"
   | OpIneg -> "ineg"
@@ -517,6 +620,10 @@ let s_jcode code =
   | OpIreturn -> "ireturn"
   | OpIshl -> "ishl"
   | OpIshr -> "ishr"
+  | OpIstore_0 -> "istore_0"
+  | OpIstore_1 -> "istore_1"
+  | OpIstore_2 -> "istore_2"
+  | OpIstore_3 -> "istore_3"
   | OpIstore i -> wi "istore" i
   | OpIsub -> "isub"
   | OpIushr -> "iushr"
@@ -531,6 +638,10 @@ let s_jcode code =
   | OpLastore -> "lastore"
   | OpLcmp -> "lcmp"
   | OpLdiv -> "ldiv"
+  | OpLload_0 -> "lload_0"
+  | OpLload_1 -> "lload_1"
+  | OpLload_2 -> "lload_2"
+  | OpLload_3 -> "lload_3"
   | OpLload i -> wi "lload" i
   | OpLmul -> "lmul"
   | OpLneg -> "lneg"
@@ -539,6 +650,10 @@ let s_jcode code =
   | OpLreturn -> "lreturn"
   | OpLshl -> "lshl"
   | OpLshr -> "lshr"
+  | OpLstore_0 -> "lstore_0"
+  | OpLstore_1 -> "lstore_1"
+  | OpLstore_2 -> "lstore_2"
+  | OpLstore_3 -> "lstore_3"
   | OpLstore i -> wi "lstore" i
   | OpLsub -> "lsub"
   | OpLushr -> "lushr"
@@ -560,8 +675,16 @@ let s_jcode code =
   | OpMultianewarray(path,i) -> "multinewarray" (* TODO *)
   | OpNewarray(jsig) -> "newarray" (* TODO *)
   (* reference *)
+  | OpAload_0 -> "aload_0"
+  | OpAload_1 -> "aload_1"
+  | OpAload_2 -> "aload_2"
+  | OpAload_3 -> "aload_3"
   | OpAload i -> wi "aload" i
   | OpAreturn -> "areturn"
+  | OpAstore_0 -> "astore_0"
+  | OpAstore_1 -> "astore_1"
+  | OpAstore_2 -> "astore_2"
+  | OpAstore_3 -> "astore_3"
   | OpAstore i -> wi "astore" i
   (* object *)
   | OpNew path -> wp "new" path
@@ -579,11 +702,11 @@ let s_jcode code =
   (* branching *)
   | OpIf_acmpeq i -> wi "acmpeq" i
   | OpIf_acmpne i -> wi "acmpne" i
-  | OpIf_icmp(cmp,i) -> wi "icmp" i (* TODO *)
-  | OpIf(cmp,i) -> wi "if" i (* TODO *)
+  | OpIf_icmp(cmp,i) -> wi "if_icmp" !i (* TODO *)
+  | OpIf(cmp,i) -> wi "if" !i (* TODO *)
   | OpIfnonnull i -> wi "ifnotnull" i
   | OpIfnull i -> wi "ifnull" i
-  | OpGoto i -> wi "goto" i
+  | OpGoto i -> wi "goto" !i
   | OpGoto_w i -> wi "goto_w" i
   | OpJsr i -> wi "jsr" i
   | OpJsr_w i -> wi "jsr_w" i
@@ -612,5 +735,7 @@ let s_jcode code =
   | OpReturn -> "return"
   | OpTableswitch -> "tableswitch"
   | OpWide -> "wide"
-  | OpIconst i -> wi "iconst" (Int32.to_int i)
-  | OpDconst f -> Printf.sprintf "dconst %f" f
+
+let s_full_frame ff =
+  let sl l = String.concat "; " (List.map VerificationTypeInfo.to_string l) in
+  Printf.sprintf "relative_offset: %i\n\tlocals: %s\n\tstack: %s" ff.ff_offset_delta (sl ff.ff_locals) (sl ff.ff_stack_items)

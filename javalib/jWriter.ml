@@ -24,31 +24,10 @@ open ExtList;;
 
 exception Writer_error_message of string
 
-type context = {
-  cpool : string IO.output;
-  ch : string IO.output;
-  mutable ccount : int;
-  mutable constants : (jconstant,int) PMap.t;
-}
-
-let error msg = raise (Writer_error_message msg)
-
-let get_reference_type i =
-  match i with
-  | RGetField ->  1
-  | RGetStatic ->  2
-  | RPutField ->  3
-  | RPutStatic ->  4
-  | RInvokeVirtual ->  5
-  | RInvokeStatic ->  6
-  | RInvokeSpecial ->  7
-  | RNewInvokeSpecial ->  8
-  | RInvokeInterface ->  9
-
-let encode_path ctx (pack,name) =
+let encode_path (pack,name) =
   String.concat "/" (pack @ [name])
 
-let rec encode_param ctx ch param =
+let rec encode_param ch param =
   match param with
   | TAny -> write_byte ch (Char.code '*')
   | TType(w, s) ->
@@ -56,9 +35,9 @@ let rec encode_param ctx ch param =
     | WExtends -> write_byte ch (Char.code '+')
     | WSuper -> write_byte ch (Char.code '-')
     | WNone -> ());
-    encode_sig_part ctx ch s
+    encode_sig_part ch s
 
-and encode_sig_part ctx ch jsig = match jsig with
+and encode_sig_part ch jsig = match jsig with
   | TByte -> write_byte ch (Char.code 'B')
   | TChar -> write_byte ch (Char.code 'C')
   | TDouble -> write_byte ch (Char.code 'D')
@@ -69,10 +48,10 @@ and encode_sig_part ctx ch jsig = match jsig with
   | TBool -> write_byte ch (Char.code 'Z')
   | TObject(path, params) ->
     write_byte ch (Char.code 'L');
-    nwrite ch (encode_path ctx path);
+    nwrite ch (encode_path path);
     if params <> [] then begin
       write_byte ch (Char.code '<');
-      List.iter (encode_param ctx ch) params;
+      List.iter (encode_param ch) params;
       write_byte ch (Char.code '>')
     end;
     write_byte ch (Char.code ';')
@@ -89,7 +68,7 @@ and encode_sig_part ctx ch jsig = match jsig with
       nwrite ch name;
       if params <> [] then begin
         write_byte ch (Char.code '<');
-        List.iter (encode_param ctx ch) params;
+        List.iter (encode_param ch) params;
         write_byte ch (Char.code '>')
       end;
     ) inners;
@@ -100,22 +79,22 @@ and encode_sig_part ctx ch jsig = match jsig with
     | Some size ->
       nwrite ch (string_of_int size);
     | None -> ());
-    encode_sig_part ctx ch s
+    encode_sig_part ch s
   | TMethod(args, ret) ->
     write_byte ch (Char.code '(');
-    List.iter (encode_sig_part ctx ch) args;
+    List.iter (encode_sig_part ch) args;
     write_byte ch (Char.code ')');
     (match ret with
       | None -> write_byte ch (Char.code 'V')
-      | Some jsig -> encode_sig_part ctx ch jsig)
+      | Some jsig -> encode_sig_part ch jsig)
   | TTypeParameter name ->
     write_byte ch (Char.code 'T');
     nwrite ch name;
     write_byte ch (Char.code ';')
 
-let encode_sig ctx jsig =
+let encode_sig jsig =
   let buf = IO.output_string() in
-  encode_sig_part ctx buf jsig;
+  encode_sig_part buf jsig;
   close_out buf
 
 let change_utf8 s =
@@ -133,101 +112,142 @@ let change_utf8 s =
      s
  ;;
 
-let rec const ctx c =
-  try
-    PMap.find c ctx.constants
-  with
-  | Not_found ->
-    let size = ref 1 in
-    (match c with
-    (** references a class or an interface - jpath must be encoded as StringUtf8 *)
-    | ConstClass path -> (* tag = 7 *)
-        let arg = (const ctx (ConstUtf8 (encode_path ctx path))) in
-        write_byte ctx.cpool 7;
-        write_ui16 ctx.cpool arg;
-    (** field reference *)
-    | ConstField (jpath, unqualified_name, jsignature) (* tag = 9 *) ->
-        let arg1 = (const ctx (ConstClass jpath)) in
-        let arg2 = (const ctx (ConstNameAndType (unqualified_name, jsignature))) in
-        write_byte ctx.cpool 9;
-        write_ui16 ctx.cpool arg1;
-        write_ui16 ctx.cpool arg2;
-    (** method reference; string can be special "<init>" and "<clinit>" values *)
-    | ConstMethod (jpath, unqualified_name, jmethod_signature) (* tag = 10 *) ->
-        let arg1 = (const ctx (ConstClass jpath)) in
-        let arg2 = (const ctx (ConstNameAndType (unqualified_name, TMethod jmethod_signature))) in
-        write_byte ctx.cpool 10;
-        write_ui16 ctx.cpool arg1;
-        write_ui16 ctx.cpool arg2;
-    (** interface method reference *)
-    | ConstInterfaceMethod (jpath, unqualified_name, jmethod_signature) (* tag = 11 *) ->
-        let arg1 = (const ctx (ConstClass jpath)); in
-        let arg2 = (const ctx (ConstNameAndType (unqualified_name, TMethod jmethod_signature))) in
-        write_byte ctx.cpool 11;
-        write_ui16 ctx.cpool arg1;
-        write_ui16 ctx.cpool arg2;
-    (** constant values *)
-    | ConstString s  (* tag = 8 *) ->
-        let arg = (const ctx (ConstUtf8 s)) in
-        write_byte ctx.cpool 8;
-        write_ui16 ctx.cpool arg
-    | ConstInt i (* tag = 3 *) ->
-        write_byte ctx.cpool 3;
-        write_real_i32 ctx.cpool i
-    | ConstFloat f (* tag = 4 *) ->
-        write_byte ctx.cpool 4;
-        (match classify_float f with
-        | FP_normal | FP_subnormal | FP_zero ->
-            write_real_i32 ctx.cpool (Int32.bits_of_float f)
-        | FP_infinite when f > 0.0 ->
-            write_real_i32 ctx.cpool 0x7f800000l
-        | FP_infinite ->
-            write_real_i32 ctx.cpool 0xff800000l
-        | FP_nan ->
-            write_real_i32 ctx.cpool 0x7f800001l)
-    | ConstLong i (* tag = 5 *) ->
-        write_byte ctx.cpool 5;
-        write_i64 ctx.cpool i;
-        size := 2;
-    | ConstDouble d (* tag = 6 *) ->
-        write_byte ctx.cpool 6;
-        write_double ctx.cpool d;
-        size := 2;
-    (** name and type: used to represent a field or method, without indicating which class it belongs to *)
-    | ConstNameAndType (unqualified_name, jsignature) ->
-        let arg1 = (const ctx (ConstUtf8 (unqualified_name))) in
-        let arg2 = (const ctx (ConstUtf8 (encode_sig ctx jsignature))) in
-        write_byte ctx.cpool 12;
-        write_ui16 ctx.cpool arg1;
-        write_ui16 ctx.cpool arg2;
-    (** UTF8 encoded strings. Note that when reading/writing, take into account Utf8 modifications of java *)
-    (* (http://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.4.7) *)
-    | ConstUtf8 s ->
-        write_byte ctx.cpool 1;
-        let s = change_utf8 s in
-        write_ui16 ctx.cpool (String.length s);
-        nwrite ctx.cpool s
-    (** invokeDynamic-specific *)
-    | ConstMethodHandle (reference_type, jconstant) (* tag = 15 *) ->
-        let arg = (const ctx jconstant) in
-        write_byte ctx.cpool 15;
-        write_byte ctx.cpool (get_reference_type reference_type);
-        write_ui16 ctx.cpool arg;
-    | ConstMethodType jmethod_signature (* tag = 16 *) ->
-        let arg = (const ctx (ConstUtf8 (encode_sig ctx (TMethod jmethod_signature)))) in
-        write_byte ctx.cpool 16;
-        write_ui16 ctx.cpool arg
-    | ConstInvokeDynamic (bootstrap_method, unqualified_name, jsignature) (* tag = 18 *) ->
-        let arg = (const ctx (ConstNameAndType(unqualified_name, jsignature))) in
-        write_byte ctx.cpool 18;
-        write_ui16 ctx.cpool bootstrap_method;
-        write_ui16 ctx.cpool arg
-    | ConstUnusable -> assert false);
-    ctx.ccount <- ctx.ccount + !size;
-    ctx.ccount - !size
+let get_reference_type i =
+  match i with
+  | RGetField ->  1
+  | RGetStatic ->  2
+  | RPutField ->  3
+  | RPutStatic ->  4
+  | RInvokeVirtual ->  5
+  | RInvokeStatic ->  6
+  | RInvokeSpecial ->  7
+  | RNewInvokeSpecial ->  8
+  | RInvokeInterface ->  9
+
+class jvm_constant_pool = object(self)
+  val mutable constants = [];
+  val constant_lookup = Hashtbl.create 0;
+  val mutable offset = 1;
+
+  method add jc =
+    try
+      Hashtbl.find constant_lookup jc
+    with Not_found ->
+      let i = offset in
+      constants <- jc :: constants;
+      offset <- offset + (match jc with ConstLong _ | ConstDouble _ -> 2 | _ -> 1);
+      Hashtbl.add constant_lookup jc i;
+      i
+
+  method add_op jc =
+    let i = self#add jc in
+    match jc with
+      | ConstLong _ | ConstDouble _ -> OpLdc2_w i,3
+      | _ -> if i <= 0xFF then OpLdc i,2 else OpLdc_w i,3
+
+  method length = offset
+
+  method write_to (ch : string IO.output) =
+    let rec loop jc = match jc with
+      (** references a class or an interface - jpath must be encoded as StringUtf8 *)
+      | ConstClass path -> (* tag = 7 *)
+          let arg = (self#add (ConstUtf8 (encode_path path))) in
+          write_byte ch 7;
+          write_ui16 ch arg;
+      (** field reference *)
+      | ConstField (jpath, unqualified_name, jsignature) (* tag = 9 *) ->
+          let arg1 = (self#add (ConstClass jpath)) in
+          let arg2 = (self#add (ConstNameAndType (unqualified_name, jsignature))) in
+          write_byte ch 9;
+          write_ui16 ch arg1;
+          write_ui16 ch arg2;
+      (** method reference; string can be special "<init>" and "<clinit>" values *)
+      | ConstMethod (jpath, unqualified_name, jmethod_signature) (* tag = 10 *) ->
+          let arg1 = (self#add (ConstClass jpath)) in
+          let arg2 = (self#add (ConstNameAndType (unqualified_name, TMethod jmethod_signature))) in
+          write_byte ch 10;
+          write_ui16 ch arg1;
+          write_ui16 ch arg2;
+      (** interface method reference *)
+      | ConstInterfaceMethod (jpath, unqualified_name, jmethod_signature) (* tag = 11 *) ->
+          let arg1 = (self#add (ConstClass jpath)); in
+          let arg2 = (self#add (ConstNameAndType (unqualified_name, TMethod jmethod_signature))) in
+          write_byte ch 11;
+          write_ui16 ch arg1;
+          write_ui16 ch arg2;
+      (** constant values *)
+      | ConstString s  (* tag = 8 *) ->
+          let arg = (self#add (ConstUtf8 s)) in
+          write_byte ch 8;
+          write_ui16 ch arg
+      | ConstInt i (* tag = 3 *) ->
+          write_byte ch 3;
+          write_real_i32 ch i
+      | ConstFloat f (* tag = 4 *) ->
+          write_byte ch 4;
+          (match classify_float f with
+          | FP_normal | FP_subnormal | FP_zero ->
+              write_real_i32 ch (Int32.bits_of_float f)
+          | FP_infinite when f > 0.0 ->
+              write_real_i32 ch 0x7f800000l
+          | FP_infinite ->
+              write_real_i32 ch 0xff800000l
+          | FP_nan ->
+              write_real_i32 ch 0x7f800001l)
+      | ConstLong i (* tag = 5 *) ->
+          write_byte ch 5;
+          write_i64 ch i;
+      | ConstDouble d (* tag = 6 *) ->
+          write_byte ch 6;
+          write_double ch d;
+      (** name and type: used to represent a field or method, without indicating which class it belongs to *)
+      | ConstNameAndType (unqualified_name, jsignature) ->
+          let arg1 = (self#add (ConstUtf8 (unqualified_name))) in
+          let arg2 = (self#add (ConstUtf8 (encode_sig jsignature))) in
+          write_byte ch 12;
+          write_ui16 ch arg1;
+          write_ui16 ch arg2;
+      (** UTF8 encoded strings. Note that when reading/writing, take into account Utf8 modifications of java *)
+      (* (http://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.4.7) *)
+      | ConstUtf8 s ->
+          write_byte ch 1;
+          let s = change_utf8 s in
+          write_ui16 ch (String.length s);
+          nwrite ch s
+      (** invokeDynamic-specific *)
+      | ConstMethodHandle (reference_type, jconstant) (* tag = 15 *) ->
+          let arg = (self#add jconstant) in
+          write_byte ch 15;
+          write_byte ch (get_reference_type reference_type);
+          write_ui16 ch arg;
+      | ConstMethodType jmethod_signature (* tag = 16 *) ->
+          let arg = (self#add (ConstUtf8 (encode_sig (TMethod jmethod_signature)))) in
+          write_byte ch 16;
+          write_ui16 ch arg
+      | ConstInvokeDynamic (bootstrap_method, unqualified_name, jsignature) (* tag = 18 *) ->
+          let arg = (self#add (ConstNameAndType(unqualified_name, jsignature))) in
+          write_byte ch 18;
+          write_ui16 ch bootstrap_method;
+          write_ui16 ch arg
+      | ConstUnusable -> assert false
+    in
+    match constants with
+      | [] -> ()
+      | l ->
+        constants <- [];
+        List.iter loop (List.rev l);
+        self#write_to ch
+end
+
+type context = {
+  ch : string IO.output;
+  cpool : jvm_constant_pool;
+}
+
+let error msg = raise (Writer_error_message msg)
 
 let write_const ctx ch cconst =
-  write_ui16 ch (const ctx cconst)
+  write_ui16 ch (ctx.cpool#add cconst)
 ;;
 
 let write_formal_type_params ctx ch tparams =
@@ -238,10 +258,10 @@ let write_formal_type_params ctx ch tparams =
     | None -> ()
     | Some jsig ->
       write_byte ch (Char.code ':');
-      nwrite ch (encode_sig ctx jsig));
+      nwrite ch (encode_sig jsig));
     List.iter (fun jsig ->
       write_byte ch (Char.code ':');
-      nwrite ch (encode_sig ctx jsig)
+      nwrite ch (encode_sig jsig)
     ) impl
   ) tparams;
   write_byte ch (Char.code '>');
@@ -249,10 +269,10 @@ let write_formal_type_params ctx ch tparams =
 
 let write_complete_method_signature ctx ch (tparams : jtypes) msig throws =
   if tparams <> [] then write_formal_type_params ctx ch tparams;
-  nwrite ch (encode_sig ctx (TMethod(msig)));
+  nwrite ch (encode_sig (TMethod(msig)));
   if throws <> [] then List.iter (fun jsig ->
     write_byte ch (Char.code '^');
-    nwrite ch (encode_sig ctx jsig)
+    nwrite ch (encode_sig jsig)
   ) throws
 ;;
 
@@ -271,7 +291,7 @@ let rec write_ann_element ctx ch (name,eval) =
   write_element_value ctx ch eval
 
 and write_annotation ctx ch ann =
-  write_const ctx ch (ConstUtf8 (encode_sig ctx ann.ann_type));
+  write_const ctx ch (ConstUtf8 (encode_sig ann.ann_type));
   write_ui16 ch (List.length ann.ann_elements);
   List.iter (write_ann_element ctx ch) ann.ann_elements
 
@@ -280,14 +300,14 @@ and write_element_value ctx ch value = match value with
     | TObject((["java";"lang"],"String"), []) ->
       write_byte ch (Char.code 's')
     | TByte | TChar | TDouble | TFloat | TInt | TLong | TShort | TBool ->
-      nwrite ch (encode_sig ctx jsig)
+      nwrite ch (encode_sig jsig)
     | _ ->
-      let s = encode_sig ctx jsig in
+      let s = encode_sig jsig in
       error ("Invalid signature " ^ s ^ " for constant value"));
-    write_ui16 ch (const ctx cconst)
+    write_ui16 ch (ctx.cpool#add cconst)
   | ValEnum(jsig,name) ->
     write_byte ch (Char.code 'e');
-    write_const ctx ch (ConstUtf8 (encode_sig ctx jsig));
+    write_const ctx ch (ConstUtf8 (encode_sig jsig));
     write_const ctx ch (ConstUtf8 name)
   | ValClass(jsig) ->
     write_byte ch (Char.code 'c');
@@ -296,7 +316,7 @@ and write_element_value ctx ch value = match value with
       | TObject((["java";"lang"],"Void"),[]) ->
         "V"
       | _ ->
-        encode_sig ctx jsig
+        encode_sig jsig
     in
     write_const ctx ch (ConstUtf8 (esig))
   | ValAnnotation ann ->
@@ -326,13 +346,13 @@ let write_opcode ctx ch code =
     w (i land 0xFF);
   in
   let path jpath =
-    bp (const ctx (ConstClass jpath))
+    bp (ctx.cpool#add (ConstClass jpath))
   in
   let meth m =
-    bp (const ctx (ConstMethod m))
+    bp (ctx.cpool#add (ConstMethod m))
   in
   let field f =
-    bp (const ctx (ConstField f))
+    bp (ctx.cpool#add (ConstField f))
   in
   let rec loop code = match code with
     (* double *)
@@ -347,19 +367,19 @@ let write_opcode ctx ch code =
     | OpDdiv -> w 0x6f
     | OpDconst_0 -> w 0xe
     | OpDconst_1 -> w 0xf
-    | OpDload 0 -> w 0x26
-    | OpDload 1 -> w 0x27
-    | OpDload 2 -> w 0x28
-    | OpDload 3 -> w 0x29
+    | OpDload_0 -> w 0x26
+    | OpDload_1 -> w 0x27
+    | OpDload_2 -> w 0x28
+    | OpDload_3 -> w 0x29
     | OpDload i -> w 0x18; w i
     | OpDmul -> w 0x6b
     | OpDneg -> w 0x77
     | OpDrem -> w 0x73
     | OpDreturn -> w 0xaf
-    | OpDstore 0 -> w 0x47
-    | OpDstore 1 -> w 0x48
-    | OpDstore 2 -> w 0x49
-    | OpDstore 3 -> w 0x4a
+    | OpDstore_0 -> w 0x47
+    | OpDstore_1 -> w 0x48
+    | OpDstore_2 -> w 0x49
+    | OpDstore_3 -> w 0x4a
     | OpDstore i -> w 0x39; w i
     | OpDsub -> w 0x67
     (* float *)
@@ -375,19 +395,19 @@ let write_opcode ctx ch code =
     | OpFconst_0 -> w 0xb
     | OpFconst_1 -> w 0xc
     | OpFconst_2 -> w 0xd
-    | OpFload 0 -> w 0x22
-    | OpFload 1 -> w 0x23
-    | OpFload 2 -> w 0x24
-    | OpFload 3 -> w 0x25
+    | OpFload_0 -> w 0x22
+    | OpFload_1 -> w 0x23
+    | OpFload_2 -> w 0x24
+    | OpFload_3 -> w 0x25
     | OpFload i -> w 0x17; w i
     | OpFmul -> w 0x6a
     | OpFneg -> w 0x76
     | OpFrem -> w 0x72
     | OpFreturn -> w 0xae
-    | OpFstore 0 -> w 0x43
-    | OpFstore 1 -> w 0x44
-    | OpFstore 2 -> w 0x45
-    | OpFstore 3 -> w 0x46
+    | OpFstore_0 -> w 0x43
+    | OpFstore_1 -> w 0x44
+    | OpFstore_2 -> w 0x45
+    | OpFstore_3 -> w 0x46
     | OpFstore i -> w 0x38; w i
     | OPFsub -> w 0x66
     (* int *)
@@ -409,10 +429,10 @@ let write_opcode ctx ch code =
     | OpIconst_4 -> w 0x7
     | OpIconst_5 -> w 0x8
     | OpIdiv -> w 0x6c
-    | OpIload 0 -> w 0x1a
-    | OpIload 1 -> w 0x1b
-    | OpIload 2 -> w 0x1c
-    | OpIload 3 -> w 0x1d
+    | OpIload_0 -> w 0x1a
+    | OpIload_1 -> w 0x1b
+    | OpIload_2 -> w 0x1c
+    | OpIload_3 -> w 0x1d
     | OpIload i -> w 0x15; w i
     | OpImul -> w 0x68
     | OpIneg -> w 0x74
@@ -421,10 +441,10 @@ let write_opcode ctx ch code =
     | OpIreturn -> w 0xac
     | OpIshl -> w 0x78
     | OpIshr -> w 0x7a
-    | OpIstore 0 -> w 0x3b
-    | OpIstore 1 -> w 0x3c
-    | OpIstore 2 -> w 0x3d
-    | OpIstore 3 -> w 0x3e
+    | OpIstore_0 -> w 0x3b
+    | OpIstore_1 -> w 0x3c
+    | OpIstore_2 -> w 0x3d
+    | OpIstore_3 -> w 0x3e
     | OpIstore i -> w 0x36; w i
     | OpIsub -> w 0x64
     | OpIushr -> w 0x7c
@@ -439,10 +459,10 @@ let write_opcode ctx ch code =
     | OpLastore -> w 0x50
     | OpLcmp -> w 0x94
     | OpLdiv -> w 0x6d
-    | OpLload 0 -> w 0x1e
-    | OpLload 1 -> w 0x1f
-    | OpLload 2 -> w 0x20
-    | OpLload 3 -> w 0x21
+    | OpLload_0 -> w 0x1e
+    | OpLload_1 -> w 0x1f
+    | OpLload_2 -> w 0x20
+    | OpLload_3 -> w 0x21
     | OpLload i ->  w 0x16; w i
     | OpLmul -> w 0x69
     | OpLneg -> w 0x75
@@ -451,10 +471,10 @@ let write_opcode ctx ch code =
     | OpLreturn -> w 0xad
     | OpLshl -> w 0x79
     | OpLshr -> w 0x7b
-    | OpLstore 0 -> w 0x3f
-    | OpLstore 1 -> w 0x40
-    | OpLstore 2 -> w 0x41
-    | OpLstore 3 -> w 0x42
+    | OpLstore_0 -> w 0x3f
+    | OpLstore_1 -> w 0x40
+    | OpLstore_2 -> w 0x41
+    | OpLstore_3 -> w 0x42
     | OpLstore i -> w 0x37; w i
     | OpLsub -> w 0x65
     | OpLushr -> w 0x7d
@@ -476,23 +496,23 @@ let write_opcode ctx ch code =
     | OpMultianewarray(jpath,d) -> w 0xc5; path jpath; w d
     | OpNewarray jsig -> assert false
     (* reference *)
-    | OpAload 0 -> w 0x2a
-    | OpAload 1 -> w 0x2b
-    | OpAload 2 -> w 0x2c
-    | OpAload 3 -> w 0x2d
+    | OpAload_0 -> w 0x2a
+    | OpAload_1 -> w 0x2b
+    | OpAload_2 -> w 0x2c
+    | OpAload_3 -> w 0x2d
     | OpAload i -> w 0x19; w i
     | OpAreturn -> w 0xb0
-    | OpAstore 0 -> w 0x4b
-    | OpAstore 1 -> w 0x4c
-    | OpAstore 2 -> w 0x4d
-    | OpAstore 3 -> w 0x4e
+    | OpAstore_0 -> w 0x4b
+    | OpAstore_1 -> w 0x4c
+    | OpAstore_2 -> w 0x4d
+    | OpAstore_3 -> w 0x4e
     | OpAstore i -> w 0x3a; w i
     (* object *)
     | OpNew jpath -> w 0xbb; path jpath
     | Opinstanceof jpath -> w 0xc1; path jpath
     | OpCheckcast jpath -> w 0xc0; path jpath
-    | OpInvokedynamic id -> w 0xba; bp (const ctx (ConstInvokeDynamic id)); w 0; w 0 (* ??? *)
-    | OpInvokeinterface(im,c) -> w 0xb9; bp (const ctx (ConstInterfaceMethod im)); w c
+    | OpInvokedynamic id -> w 0xba; bp (ctx.cpool#add (ConstInvokeDynamic id)); w 0; w 0 (* ??? *)
+    | OpInvokeinterface(im,c) -> w 0xb9; bp (ctx.cpool#add (ConstInterfaceMethod im)); w c
     | OpInvokespecial m -> w 0xb7; meth m
     | OpInvokestatic m -> w 0xb8; meth m
     | OpInvokevirtual m -> w 0xb6; meth m
@@ -512,7 +532,7 @@ let write_opcode ctx ch code =
         | CmpGt -> w 0xa3
         | CmpLe -> w 0xa4
       end;
-      bp i
+      bp !i
     | OpIf(cmp,i) ->
       begin match cmp with
         | CmpEq -> w 0x99
@@ -522,10 +542,10 @@ let write_opcode ctx ch code =
         | CmpGt -> w 0x9d
         | CmpLe -> w 0x9e
       end;
-      bp i
+      bp !i
     | OpIfnonnull i -> w 0xc7; bp i
     | OpIfnull i -> w 0xc6; bp i
-    | OpGoto i -> w 0xa7; bp i
+    | OpGoto i -> w 0xa7; bp !i
     | OpGoto_w i -> w 0xc8; b4 i
     | OpJsr i -> w 0xa8; bp i
     | OpJsr_w i -> w 0xc9; b4 i
@@ -554,36 +574,34 @@ let write_opcode ctx ch code =
     | OpReturn -> w 0xb1
     | OpTableswitch -> assert false (* TODO *)
     | OpWide -> assert false (* TODO *)
-    (* convenience/custom *)
-    | OpIconst i32 ->
-      let op = match Int32.to_int i32 with
-        | -1 -> OpIconst_m1
-        | 0 -> OpIconst_0
-        | 1 -> OpIconst_1
-        | 2 -> OpIconst_2
-        | 3 -> OpIconst_3
-        | 4 -> OpIconst_4
-        | 5 -> OpIconst_5
-        | i ->
-          if i >= -128 && i <= 127 then
-            OpBipush i
-          else if i >= -32768 && i <= 32767 then
-            OpSipush i
-          else
-            let c = const ctx (ConstInt i32) in
-            if c <= 255 then OpLdc c
-            else OpLdc_w c
-      in
-      loop op
-    | OpDconst f ->
-      let op = match f with
-        | 0.0 -> OpDconst_0
-        | 1.0 -> OpDconst_1
-        | _ -> OpLdc2_w (const ctx (ConstDouble f))
-      in
-      loop op
   in
   loop code
+
+open VerificationTypeInfo
+
+let generate_stack_map_table ctx ffl =
+  let ch = output_string() in
+  write_ui16 ch (List.length ffl);
+  let write_verification_type_info vti = match vti with
+    | VTITop -> write_byte ch 0
+    | VTIInteger -> write_byte ch 1
+    | VTIFloat -> write_byte ch 2
+    | VTILong -> write_byte ch 4
+    | VTIDouble -> write_byte ch 3
+    | VTINull -> write_byte ch 5
+    | VTIUninitializedThis -> write_byte ch 6
+    | VTIObject path -> write_byte ch 7; write_ui16 ch (ctx.cpool#add (ConstClass path))
+    | VTIUninitializedVariable offset -> write_byte ch 8; write_ui16 ch offset
+  in
+  List.iter (fun ff ->
+    write_byte ch 255;
+    write_ui16 ch ff.ff_offset_delta;
+    write_ui16 ch (List.length ff.ff_locals);
+    List.iter write_verification_type_info ff.ff_locals;
+    write_ui16 ch (List.length ff.ff_stack_items);
+    List.iter write_verification_type_info ff.ff_stack_items
+  ) ffl;
+  close_out ch
 
 let rec generate_code_attribute ctx jcode =
   let ch = output_string() in
@@ -618,6 +636,8 @@ and write_attribute ctx ch attr =
       name, out
     | AttrCode jcode ->
       "Code", generate_code_attribute ctx jcode
+    | AttrStackMapTable ffl ->
+      "StackMapTable", generate_stack_map_table ctx ffl
     | AttrUnknown(name,contents) ->
       name, contents
   in
@@ -640,31 +660,29 @@ let all_method_flags_table = enumerated_hashtbl_of_list all_method_flags
 
 let write_field ctx is_method jf =
   write_access_flags ctx (if is_method then all_method_flags_table else all_field_flags_table) jf.jf_flags;
-  write_ui16 ctx.ch (const ctx (ConstUtf8 jf.jf_name));
-  write_ui16 ctx.ch (const ctx (ConstUtf8 (encode_sig ctx jf.jf_vmsignature)));
+  write_ui16 ctx.ch (ctx.cpool#add (ConstUtf8 jf.jf_name));
+  write_ui16 ctx.ch (ctx.cpool#add (ConstUtf8 (encode_sig jf.jf_vmsignature)));
   let attributes = match jf.jf_code with
     | None -> jf.jf_attributes
     | Some jcode -> (AttrCode jcode) :: jf.jf_attributes
   in
   write_attributes ctx ctx.ch attributes
 
-let write_class ch_main c =
+let write_class ch_main cpool c =
   write_real_i32 ch_main 0xCAFEBABEl;
   write_ui16 ch_main (fst c.cversion);
   write_ui16 ch_main (snd c.cversion);
   let ch = IO.output_string() in
   let ctx = {
-    ccount = 1;
-    cpool = IO.output_string();
     ch = ch;
-    constants = PMap.empty;
+    cpool = cpool;
   } in
   let index_from_signature jsig = match jsig with
-    | TObject(path,[]) -> const ctx (ConstClass path)
+    | TObject(path,[]) -> ctx.cpool#add (ConstClass path)
     | _ -> error "Invalid signature"
   in
   write_access_flags ctx all_class_flags_table c.cflags;
-  write_ui16 ch (const ctx (ConstClass c.cpath));
+  write_ui16 ch (ctx.cpool#add (ConstClass c.cpath));
   write_ui16 ch (index_from_signature c.csuper);
   write_ui16 ch (List.length c.cinterfaces);
   List.iter (fun jsig -> write_ui16 ch (index_from_signature jsig)) c.cinterfaces;
@@ -673,6 +691,8 @@ let write_class ch_main c =
   write_ui16 ch (List.length c.cmethods);
   List.iter (write_field ctx true) c.cmethods;
   write_attributes ctx ctx.ch c.cattributes;
-  write_ui16 ch_main ctx.ccount;
-  nwrite ch_main (close_out ctx.cpool);
+  let ch_cpool = IO.output_string() in
+  cpool#write_to ch_cpool;
+  write_ui16 ch_main cpool#length;
+  nwrite ch_main (close_out ch_cpool);
   nwrite ch_main (close_out ch)
